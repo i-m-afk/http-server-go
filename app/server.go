@@ -22,18 +22,24 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fmt.Println(string(buffer[:n]))
 	splits := strings.Split(string(buffer[:n]), "\r\n")
 	startLine := splits[0]
 	startLineSplits := strings.Split(startLine, " ")
 	// path :
-	path := startLineSplits[1]
-	fmt.Println(path)
+	fullPath := startLineSplits[1]
+	fullPathSplits := strings.Split(fullPath, "/")
+	path := strings.Join(fullPathSplits[:2], "/")
+	// ignore echo
+	childPath := strings.Join(fullPathSplits[2:], "/")
 
 	// reply
-	if path == "/" {
+	reply := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(childPath), childPath)
+	switch path {
+	case "/":
 		conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
-	} else {
+	case "/echo":
+		conn.Write([]byte(reply))
+	default:
 		conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
 	}
 
