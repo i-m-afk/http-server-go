@@ -29,16 +29,22 @@ func main() {
 	fullPath := startLineSplits[1]
 	fullPathSplits := strings.Split(fullPath, "/")
 	path := strings.Join(fullPathSplits[:2], "/")
-	// ignore echo
 	childPath := strings.Join(fullPathSplits[2:], "/")
 
-	// reply
-	reply := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(childPath), childPath)
+	// user-agent
+	userAgent := splits[2]
+	userAgent = userAgent[len("User-Agent: "):]
+
 	switch path {
 	case "/":
 		conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
 	case "/echo":
+		reply := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(childPath), childPath)
 		conn.Write([]byte(reply))
+	case "/user-agent":
+		reply := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(userAgent), userAgent)
+		conn.Write([]byte(reply))
+
 	default:
 		conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
 	}
