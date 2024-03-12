@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -8,7 +9,12 @@ import (
 	"strings"
 )
 
+var directory *string
+
 func main() {
+	// get flags
+	directory = flag.String("directory", "", "directory where files are searched")
+	flag.Parse()
 	l, err := net.Listen("tcp", "0.0.0.0:4221")
 	if err != nil {
 		fmt.Println("Failed to bind to port 4221")
@@ -79,7 +85,23 @@ func handleConnection(conn net.Conn) {
 	case "/user-agent":
 		reply := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(userAgent), userAgent)
 		conn.Write([]byte(reply))
+	case "/files":
+		filepath := *directory + subpath
+		ok, content := getFile(filepath)
+		if !ok {
+			conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+		} else {
+			conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\n%s", len(content), content)))
+		}
 	default:
 		conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
 	}
+}
+
+func getFile(filepath string) (bool, string) {
+	file, err := os.ReadFile(filepath)
+	if err != nil {
+		return false, ""
+	}
+	return true, string(file)
 }
