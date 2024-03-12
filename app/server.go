@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"net"
 	"os"
@@ -42,7 +43,6 @@ func handleConnection(conn net.Conn) {
 	request := string(buffer[:n])
 
 	splits := strings.Split(request, "\r\n")
-	fmt.Println(splits)
 	if len(splits) < 1 {
 		log.Println("Invalid request: no headers")
 		return
@@ -50,7 +50,6 @@ func handleConnection(conn net.Conn) {
 
 	// request line
 	startLineSplits := strings.Split(splits[0], " ")
-	fmt.Println(startLineSplits)
 	if len(startLineSplits) < 3 {
 		log.Println("Invalid request: malformed start line")
 		return
@@ -66,7 +65,7 @@ func handleConnection(conn net.Conn) {
 		subpath = strings.Join(pathSplits[2:], "/")
 	}
 	httpVersion := startLineSplits[2]
-	fmt.Println(method, httpVersion)
+	fmt.Println("http version: ", httpVersion)
 	// Extract User-Agent header
 	var userAgent string
 	for _, header := range splits {
@@ -75,26 +74,42 @@ func handleConnection(conn net.Conn) {
 			break
 		}
 	}
+	// Read Body
+	bodyStart := strings.Index(string(request), "\r\n\r\n")
+	if bodyStart == -1 || bodyStart+4 == len(request) {
+		log.Println("No body found")
+	}
 
-	switch root {
-	case "/":
-		conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
-	case "/echo":
-		reply := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(subpath), subpath)
-		conn.Write([]byte(reply))
-	case "/user-agent":
-		reply := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(userAgent), userAgent)
-		conn.Write([]byte(reply))
-	case "/files":
-		filepath := *directory + subpath
-		ok, content := getFile(filepath)
-		if !ok {
+	switch method {
+	case "GET":
+		switch root {
+		case "/":
+			conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
+		case "/echo":
+			reply := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(subpath), subpath)
+			conn.Write([]byte(reply))
+		case "/user-agent":
+			reply := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(userAgent), userAgent)
+			conn.Write([]byte(reply))
+		case "/files":
+			filepath := *directory + subpath
+			ok, content := getFile(filepath)
+			if !ok {
+				conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+			} else {
+				conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\n%s", len(content), content)))
+			}
+		default:
 			conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
-		} else {
-			conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\n%s", len(content), content)))
 		}
-	default:
-		conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
+	case "POST":
+		switch root {
+		case "/files":
+			filename := subpath
+			filepath := *directory + "/" + filename
+			writeFile(filepath, string(request[bodyStart+4:]))
+			conn.Write([]byte("HTTP/1.1 201\r\n\r\n"))
+		}
 	}
 }
 
@@ -104,4 +119,8 @@ func getFile(filepath string) (bool, string) {
 		return false, ""
 	}
 	return true, string(file)
+}
+
+func writeFile(filepath string, content string) {
+	os.WriteFile(filepath, []byte(content), fs.FileMode(os.O_CREATE))
 }
