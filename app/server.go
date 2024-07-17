@@ -134,8 +134,8 @@ func handleConnection(conn net.Conn) {
 		case "/files":
 			filename := subpath
 			filepath := *directory + "/" + filename
-			writeFile(filepath, string(request[bodyStart+4:]))
-			conn.Write([]byte("HTTP/1.1 201\r\n\r\n"))
+			writeFile(filepath, httpReq.Body)
+			conn.Write([]byte("HTTP/1.1 201 Created\r\n\r\n"))
 		}
 	}
 }
