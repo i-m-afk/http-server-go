@@ -114,6 +114,16 @@ func handleConnection(conn net.Conn) {
 				reply = fmt.Sprintf("%s 200 OK\r\nContent-Encoding: %s\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s",
 					httpReq.Version, httpReq.Headers["Accept-Encoding"], len(subpath), subpath)
 			}
+			// else {
+			// 				// invalidEnc := strings.Split(httpReq.Headers["Accept-Encoding"], ",")
+			// 				// invalidEncodingString := ""
+			// 				// for _, v := range invalidEnc {
+			// 				// 	invalidEncodingString += "invalid" + v + ","
+			// 				// }
+			// 				reply = fmt.Sprintf("%s 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s",
+			// 					httpReq.Version, len(subpath), subpath)
+			// 			}
+			//
 			conn.Write([]byte(reply))
 		case "/user-agent":
 			reply := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(userAgent), userAgent)
