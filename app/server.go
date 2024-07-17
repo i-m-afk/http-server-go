@@ -110,20 +110,10 @@ func handleConnection(conn net.Conn) {
 			reply := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(subpath), subpath)
 
 			// Only accepts gzip abstract later
-			if httpReq.Headers["Accept-Encoding"] == "gzip" {
+			if isAcceptedPresent(httpReq.Headers["Accept-Encoding"]) {
 				reply = fmt.Sprintf("%s 200 OK\r\nContent-Encoding: %s\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s",
-					httpReq.Version, httpReq.Headers["Accept-Encoding"], len(subpath), subpath)
+					httpReq.Version, "gzip", len(subpath), subpath)
 			}
-			// else {
-			// 				// invalidEnc := strings.Split(httpReq.Headers["Accept-Encoding"], ",")
-			// 				// invalidEncodingString := ""
-			// 				// for _, v := range invalidEnc {
-			// 				// 	invalidEncodingString += "invalid" + v + ","
-			// 				// }
-			// 				reply = fmt.Sprintf("%s 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s",
-			// 					httpReq.Version, len(subpath), subpath)
-			// 			}
-			//
 			conn.Write([]byte(reply))
 		case "/user-agent":
 			reply := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(userAgent), userAgent)
@@ -160,4 +150,14 @@ func getFile(filepath string) (bool, string) {
 
 func writeFile(filepath string, content string) {
 	os.WriteFile(filepath, []byte(content), fs.FileMode(os.O_CREATE))
+}
+
+func isAcceptedPresent(encodings string) bool {
+	e := strings.Split(encodings, ", ")
+	for _, v := range e {
+		if v == "gzip" {
+			return true
+		}
+	}
+	return false
 }
