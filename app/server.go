@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -113,6 +115,10 @@ func handleConnection(conn net.Conn) {
 			if isAcceptedPresent(httpReq.Headers["Accept-Encoding"]) {
 				reply = fmt.Sprintf("%s 200 OK\r\nContent-Encoding: %s\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s",
 					httpReq.Version, "gzip", len(subpath), subpath)
+				fmt.Println(subpath)
+				gzippedBody := compressBody(subpath)
+				fmt.Println(gzippedBody)
+
 			}
 			conn.Write([]byte(reply))
 		case "/user-agent":
@@ -160,4 +166,12 @@ func isAcceptedPresent(encodings string) bool {
 		}
 	}
 	return false
+}
+
+func compressBody(body string) bytes.Buffer {
+	var b bytes.Buffer
+	w := gzip.NewWriter(&b)
+	w.Write([]byte(body))
+	w.Close()
+	return b
 }
