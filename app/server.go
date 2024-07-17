@@ -12,6 +12,14 @@ import (
 
 var directory *string
 
+type Request struct {
+	Method  string
+	URI     string
+	Version string
+	Headers map[string]string
+	Body    string
+}
+
 func main() {
 	// get flags
 	directory = flag.String("directory", "", "directory where files are searched")
@@ -35,7 +43,6 @@ func handleConnection(conn net.Conn) {
 	defer conn.Close()
 	buffer := make([]byte, 1024)
 	n, err := conn.Read(buffer)
-
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -55,17 +62,30 @@ func handleConnection(conn net.Conn) {
 		return
 	}
 
+	httpReq := Request{
+		Method:  startLineSplits[0],
+		URI:     startLineSplits[1],
+		Version: startLineSplits[2],
+		Headers: make(map[string]string),
+	}
+	// headers starts from splits[1:]
+	for _, header := range splits[1:] {
+		idx := strings.Index(header, ":") // get first index of ":"
+		if idx != -1 {
+			httpReq.Headers[header[:idx]] = header[idx+2:] // +2 for removing space
+		}
+	}
+
 	// Extract method, path, and HTTP version
-	method := startLineSplits[0]
-	path := startLineSplits[1]
+	method := httpReq.Method
+	path := httpReq.URI
 	pathSplits := strings.Split(path, "/")
 	root := "/" + pathSplits[1]
 	var subpath string
 	if len(pathSplits) > 1 {
 		subpath = strings.Join(pathSplits[2:], "/")
 	}
-	httpVersion := startLineSplits[2]
-	fmt.Println("http version: ", httpVersion)
+
 	// Extract User-Agent header
 	var userAgent string
 	for _, header := range splits {
@@ -76,9 +96,10 @@ func handleConnection(conn net.Conn) {
 	}
 	// Read Body
 	bodyStart := strings.Index(string(request), "\r\n\r\n")
-	if bodyStart == -1 || bodyStart+4 == len(request) {
+	if (bodyStart == -1 || bodyStart+4 == len(request)) && method != "GET" {
 		log.Println("No body found")
 	}
+	httpReq.Body = string(request[bodyStart+4:])
 
 	switch method {
 	case "GET":
@@ -87,6 +108,12 @@ func handleConnection(conn net.Conn) {
 			conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
 		case "/echo":
 			reply := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(subpath), subpath)
+
+			// Only accepts gzip abstract later
+			if httpReq.Headers["Accept-Encoding"] == "gzip" {
+				reply = fmt.Sprintf("%s 200 OK\r\nContent-Encoding: %s\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s",
+					httpReq.Version, httpReq.Headers["Accept-Encoding"], len(subpath), subpath)
+			}
 			conn.Write([]byte(reply))
 		case "/user-agent":
 			reply := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(userAgent), userAgent)
