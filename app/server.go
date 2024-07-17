@@ -1,5 +1,10 @@
 package main
 
+/*
+* This is a toy implementation of a http server
+* from scratch using a tcp server
+ */
+
 import (
 	"bytes"
 	"compress/gzip"
@@ -113,12 +118,12 @@ func handleConnection(conn net.Conn) {
 
 			// Only accepts gzip abstract later
 			if isAcceptedPresent(httpReq.Headers["Accept-Encoding"]) {
-				reply = fmt.Sprintf("%s 200 OK\r\nContent-Encoding: %s\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s",
-					httpReq.Version, "gzip", len(subpath), subpath)
+
 				fmt.Println(subpath)
 				gzippedBody := compressBody(subpath)
 				fmt.Println(gzippedBody)
-
+				reply = fmt.Sprintf("%s 200 OK\r\nContent-Encoding: %s\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s",
+					httpReq.Version, "gzip", len(gzippedBody.Bytes()), &gzippedBody)
 			}
 			conn.Write([]byte(reply))
 		case "/user-agent":
