@@ -1,8 +1,8 @@
 package main
 
 /*
-* This is a toy implementation of a http server
-* from scratch using a tcp server
+* This is a toy implementation of an HTTP server
+* from scratch using a TCP server
  */
 
 import (
@@ -14,6 +14,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -33,14 +34,15 @@ func main() {
 	flag.Parse()
 	l, err := net.Listen("tcp", "0.0.0.0:4221")
 	if err != nil {
-		fmt.Println("Failed to bind to port 4221")
-		os.Exit(1)
+		log.Fatalf("Failed to bind to port 4221: %v", err)
 	}
+	defer l.Close()
+	log.Println("Listening on port 4221...")
 	for {
 		conn, err := l.Accept()
 		if err != nil {
-			fmt.Println("Error accepting connection: ", err.Error())
-			os.Exit(1)
+			log.Printf("Error accepting connection: %v", err)
+			continue
 		}
 		go handleConnection(conn)
 	}
@@ -51,11 +53,11 @@ func handleConnection(conn net.Conn) {
 	buffer := make([]byte, 1024)
 	n, err := conn.Read(buffer)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("Error reading from connection: %v", err)
+		return
 	}
 
 	request := string(buffer[:n])
-
 	splits := strings.Split(request, "\r\n")
 	if len(splits) < 1 {
 		log.Println("Invalid request: no headers")
@@ -75,80 +77,109 @@ func handleConnection(conn net.Conn) {
 		Version: startLineSplits[2],
 		Headers: make(map[string]string),
 	}
-	// headers starts from splits[1:]
+	// headers start from splits[1:]
 	for _, header := range splits[1:] {
-		idx := strings.Index(header, ":") // get first index of ":"
+		idx := strings.Index(header, ":")
 		if idx != -1 {
-			httpReq.Headers[header[:idx]] = header[idx+2:] // +2 for removing space
+			httpReq.Headers[header[:idx]] = strings.TrimSpace(header[idx+1:])
 		}
 	}
 
-	// Extract method, path, and HTTP version
-	method := httpReq.Method
-	path := httpReq.URI
-	pathSplits := strings.Split(path, "/")
-	root := "/" + pathSplits[1]
-	var subpath string
-	if len(pathSplits) > 1 {
-		subpath = strings.Join(pathSplits[2:], "/")
-	}
-
-	// Extract User-Agent header
-	var userAgent string
-	for _, header := range splits {
-		if strings.HasPrefix(header, "User-Agent: ") {
-			userAgent = strings.TrimPrefix(header, "User-Agent: ")
-			break
-		}
-	}
 	// Read Body
-	bodyStart := strings.Index(string(request), "\r\n\r\n")
-	if (bodyStart == -1 || bodyStart+4 == len(request)) && method != "GET" {
-		log.Println("No body found")
+	bodyStart := strings.Index(request, "\r\n\r\n")
+	if bodyStart != -1 && bodyStart+4 < len(request) && httpReq.Method != "GET" {
+		httpReq.Body = request[bodyStart+4:]
 	}
-	httpReq.Body = string(request[bodyStart+4:])
 
-	switch method {
+	serveHTTP(conn, httpReq)
+}
+
+func serveHTTP(conn net.Conn, req Request) {
+	root, subpath := getRootAndSubpath(req.URI)
+	switch req.Method {
 	case "GET":
-		switch root {
-		case "/":
-			conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\n"))
-		case "/echo":
-			reply := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(subpath), subpath)
-
-			// Only accepts gzip abstract later
-			if isAcceptedPresent(httpReq.Headers["Accept-Encoding"]) {
-
-				fmt.Println(subpath)
-				gzippedBody := compressBody(subpath)
-				fmt.Println(gzippedBody)
-				reply = fmt.Sprintf("%s 200 OK\r\nContent-Encoding: %s\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s",
-					httpReq.Version, "gzip", len(gzippedBody.Bytes()), &gzippedBody)
-			}
-			conn.Write([]byte(reply))
-		case "/user-agent":
-			reply := fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(userAgent), userAgent)
-			conn.Write([]byte(reply))
-		case "/files":
-			filepath := *directory + subpath
-			ok, content := getFile(filepath)
-			if !ok {
-				conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
-			} else {
-				conn.Write([]byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\n%s", len(content), content)))
-			}
-		default:
-			conn.Write([]byte("HTTP/1.1 404 Not Found\r\n\r\n"))
-		}
+		handleGET(conn, req, root, subpath)
 	case "POST":
-		switch root {
-		case "/files":
-			filename := subpath
-			filepath := *directory + "/" + filename
-			writeFile(filepath, httpReq.Body)
-			conn.Write([]byte("HTTP/1.1 201 Created\r\n\r\n"))
-		}
+		handlePOST(conn, req, root, subpath)
+	default:
+		writeResponse(conn, 405, "Method Not Allowed", "")
 	}
+}
+
+func handleGET(conn net.Conn, req Request, root, subpath string) {
+	switch root {
+	case "/":
+		writeResponse(conn, 200, "OK", "")
+	case "/echo":
+		handleEcho(conn, req, subpath)
+	case "/user-agent":
+		handleUserAgent(conn, req)
+	case "/files":
+		handleFileRequest(conn, subpath)
+	default:
+		writeResponse(conn, 404, "Not Found", "")
+	}
+}
+
+func handlePOST(conn net.Conn, req Request, root, subpath string) {
+	if root == "/files" {
+		handleFileUpload(conn, subpath, req.Body)
+	} else {
+		writeResponse(conn, 404, "Not Found", "")
+	}
+}
+
+func handleEcho(conn net.Conn, req Request, subpath string) {
+	body := subpath
+	if acceptsGzip(req.Headers["Accept-Encoding"]) {
+		gzippedBody := compressBody(body)
+		headers := map[string]string{
+			"Content-Encoding": "gzip",
+			"Content-Type":     "text/plain",
+			"Content-Length":   fmt.Sprintf("%d", gzippedBody.Len()),
+		}
+		writeResponseWithHeaders(conn, 200, "OK", gzippedBody.String(), headers)
+	} else {
+		writeResponse(conn, 200, "OK", body)
+	}
+}
+
+func handleUserAgent(conn net.Conn, req Request) {
+	userAgent := req.Headers["User-Agent"]
+	writeResponse(conn, 200, "OK", userAgent)
+}
+
+func handleFileRequest(conn net.Conn, subpath string) {
+	filepath := filepath.Clean(*directory + "/" + subpath)
+	if !strings.HasPrefix(filepath, *directory) {
+		writeResponse(conn, 403, "Forbidden", "")
+		return
+	}
+	ok, content := getFile(filepath)
+	if !ok {
+		writeResponse(conn, 404, "Not Found", "")
+	} else {
+		headers := map[string]string{
+			"Content-Type":   "application/octet-stream",
+			"Content-Length": fmt.Sprintf("%d", len(content)),
+		}
+		writeResponseWithHeaders(conn, 200, "OK", content, headers)
+	}
+}
+
+func handleFileUpload(conn net.Conn, filename, content string) {
+	filepath := filepath.Clean(*directory + "/" + filename)
+	if !strings.HasPrefix(filepath, *directory) {
+		writeResponse(conn, 403, "Forbidden", "")
+		return
+	}
+	err := os.WriteFile(filepath, []byte(content), fs.FileMode(0644))
+	if err != nil {
+		log.Printf("Error writing file: %v", err)
+		writeResponse(conn, 500, "Internal Server Error", "")
+		return
+	}
+	writeResponse(conn, 201, "Created", "")
 }
 
 func getFile(filepath string) (bool, string) {
@@ -159,24 +190,49 @@ func getFile(filepath string) (bool, string) {
 	return true, string(file)
 }
 
-func writeFile(filepath string, content string) {
-	os.WriteFile(filepath, []byte(content), fs.FileMode(os.O_CREATE))
-}
-
-func isAcceptedPresent(encodings string) bool {
-	e := strings.Split(encodings, ", ")
-	for _, v := range e {
-		if v == "gzip" {
+func acceptsGzip(encodings string) bool {
+	for _, encoding := range strings.Split(encodings, ",") {
+		if strings.TrimSpace(encoding) == "gzip" {
 			return true
 		}
 	}
 	return false
 }
 
-func compressBody(body string) bytes.Buffer {
+func compressBody(body string) *bytes.Buffer {
 	var b bytes.Buffer
 	w := gzip.NewWriter(&b)
-	w.Write([]byte(body))
+	_, err := w.Write([]byte(body))
+	if err != nil {
+		log.Printf("Error compressing body: %v", err)
+	}
 	w.Close()
-	return b
+	return &b
+}
+
+func writeResponse(conn net.Conn, statusCode int, statusText, body string) {
+	headers := map[string]string{
+		"Content-Type":   "text/plain",
+		"Content-Length": fmt.Sprintf("%d", len(body)),
+	}
+	writeResponseWithHeaders(conn, statusCode, statusText, body, headers)
+}
+
+func writeResponseWithHeaders(conn net.Conn, statusCode int, statusText, body string, headers map[string]string) {
+	response := fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, statusText)
+	for key, value := range headers {
+		response += fmt.Sprintf("%s: %s\r\n", key, value)
+	}
+	response += "\r\n" + body
+	conn.Write([]byte(response))
+}
+
+func getRootAndSubpath(uri string) (string, string) {
+	pathSplits := strings.Split(uri, "/")
+	root := "/" + pathSplits[1]
+	subpath := ""
+	if len(pathSplits) > 2 {
+		subpath = strings.Join(pathSplits[2:], "/")
+	}
+	return root, subpath
 }
